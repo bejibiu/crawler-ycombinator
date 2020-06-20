@@ -8,7 +8,7 @@ import random
 
 import aiohttp
 
-from aiofile import AIOFile
+import aiofiles
 from bs4 import BeautifulSoup
 
 SITE_NEWS = "https://news.ycombinator.com"
@@ -34,9 +34,9 @@ async def save_to_file(path_to_save, data):
         os.mkdir(os.path.dirname(path_to_save))
     if os.path.exists(path_to_save):
         logging.debug("File exist. Change name")
-        path_to_save += ''.join(random.choice(string.ascii_lowercase) for i in range(5))
+        path_to_save += "".join(random.choice(string.ascii_lowercase) for i in range(5))
     try:
-        async with AIOFile(path_to_save, "wb") as f:
+        async with aiofiles.open(path_to_save, mode="wb") as f:
             await f.write(data)
     except OSError as e:
         logging.error(f"File with path: {path_to_save} can not save. Error: {e}")
@@ -88,8 +88,14 @@ async def download_link_from_comments(output_folder, news_name, session, soup):
     comments_list_tuple = await asyncio.gather(*comments_news)
     for num, comment_with_url in enumerate(comments_list_tuple):
         if comment_with_url:
-            name_file = comment_with_url[1].name if comment_with_url[1].name else slugify(str(comment_with_url[1]))
-            await save_to_file(os.path.join(output_folder, news_name, name_file), comment_with_url[0])
+            name_file = (
+                comment_with_url[1].name
+                if comment_with_url[1].name
+                else slugify(str(comment_with_url[1]))
+            )
+            await save_to_file(
+                os.path.join(output_folder, news_name, name_file), comment_with_url[0]
+            )
 
 
 async def download_theme_news(output_folder, news_name, session, soup):
@@ -101,7 +107,7 @@ async def download_theme_news(output_folder, news_name, session, soup):
     news_theme = await download_one(session, news_site)
     if not news_theme:
         logging.error(f"url {news_site} not avalible.")
-        news_text = f"Sorry =(. Url {news_site} not avalible.".encode()
+        news_theme[0] = f"Sorry =(. Url {news_site} not avalible.".encode()
     await save_to_file(os.path.join(output_folder, news_name, news_name), news_theme[0])
 
 
