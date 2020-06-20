@@ -3,6 +3,8 @@ import asyncio
 import logging
 import os
 import re
+import string
+import random
 
 import aiohttp
 
@@ -14,50 +16,53 @@ NEWS_DETAILS_URL = SITE_NEWS + "/item?id={id_news}"
 BASE_DIR = os.path.dirname(__file__)
 
 
-async def download_one(session, url, encoded=True):
+async def download_one(session, url):
     try:
         async with session.get(url) as response:
-            if encoded:
-                return await response.text()
-            return await response.read()
+            return await response.read(), response.url
     except asyncio.TimeoutError:
         logging.error(f"url {url} not avalible.")
     except Exception as e:
         logging.error(f"Other error {url}. Error: {e} ")
 
 
-async def save_text(path_to_save, text):
-    if not text:
-        logging.error("Not data to  write")
+async def save_to_file(path_to_save, data):
+    if not data:
+        logging.error(f"Not data to  write to file by path {path_to_save}")
         return None
     if not os.path.exists(os.path.dirname(path_to_save)):
         os.mkdir(os.path.dirname(path_to_save))
-    async with AIOFile(path_to_save, "wb") as f:
-        await f.write(text)
+    if os.path.exists(path_to_save):
+        logging.debug("File exist. Change name")
+        path_to_save += ''.join(random.choice(string.ascii_lowercase) for i in range(5))
+    try:
+        async with AIOFile(path_to_save, "wb") as f:
+            await f.write(data)
+    except OSError as e:
+        logging.error(f"File with path: {path_to_save} can not save. Error: {e}")
 
 
 def slugify(text):
-    return re.sub(r"[\W_]+", "-", text)
+    return re.sub(r"[^a-zA-Z0-9 .]+", "-", text)
 
 
 async def fetch(output_folder, session, url, semaphore):
     async with semaphore:
-        news_details = await download_one(session, url)
+        news_details, _ = await download_one(session, url)
         if not news_details:
             logging.error(f"News on site {news_details}, not download")
             return None
-
         soup = BeautifulSoup(news_details, "html.parser")
 
         news_name = slugify(soup.find("a", {"class": "storylink"}).text)
 
-        await save_text(
+        await save_to_file(
             os.path.join(
                 output_folder,
                 news_name if news_name else url.split("=")[-1],
                 "news_details.html",
             ),
-            news_details.encode(),
+            news_details,
         )
         if news_name:
             await download_theme_news(output_folder, news_name, session, soup)
@@ -77,13 +82,14 @@ async def download_link_from_comments(output_folder, news_name, session, soup):
     logging.info(f"Found {len(all_links)} comment for news {news_name}")
 
     comments_news = [
-        asyncio.create_task(download_one(session, url_from_comment, encoded=False))
+        asyncio.create_task(download_one(session, url_from_comment))
         for url_from_comment in all_links
     ]
-    comments_list_text = await asyncio.gather(*comments_news)
-    for num, i in enumerate(comments_list_text):
-        if i:
-            await save_text(os.path.join(output_folder, news_name, f"comment{num}"), i)
+    comments_list_tuple = await asyncio.gather(*comments_news)
+    for num, comment_with_url in enumerate(comments_list_tuple):
+        if comment_with_url:
+            name_file = comment_with_url[1].name if comment_with_url[1].name else slugify(str(comment_with_url[1]))
+            await save_to_file(os.path.join(output_folder, news_name, name_file), comment_with_url[0])
 
 
 async def download_theme_news(output_folder, news_name, session, soup):
@@ -92,18 +98,18 @@ async def download_theme_news(output_folder, news_name, session, soup):
     if not news_site.startswith("https://") and not news_site.startswith("http://"):
         logging.info("News text locate in details")
         return None
-    news_text = await download_one(session, news_site, encoded=False)
-    if not news_text:
+    news_theme = await download_one(session, news_site)
+    if not news_theme:
         logging.error(f"url {news_site} not avalible.")
         news_text = f"Sorry =(. Url {news_site} not avalible.".encode()
-    await save_text(os.path.join(output_folder, news_name, news_name), news_text)
+    await save_to_file(os.path.join(output_folder, news_name, news_name), news_theme[0])
 
 
 async def main(args, list_news):
     semaphore = asyncio.Semaphore(args.semaphore)
     timeout = aiohttp.ClientTimeout(total=args.timeout)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        res = await download_one(session, SITE_NEWS)
+        res, _ = await download_one(session, SITE_NEWS)
         soup = BeautifulSoup(res, "html.parser")
         list_tasks_fetch_news = []
         for news in soup.find_all("tr", {"class": "athing"}):
@@ -123,7 +129,7 @@ async def main(args, list_news):
                 )
             )
         await asyncio.gather(*list_tasks_fetch_news)
-    print("This all")
+    logging.info("Fetch all.")
 
 
 async def run_forever(args, list_news):
