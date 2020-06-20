@@ -11,8 +11,8 @@ params|default|description
 `--semaphore` | 2 |number of simultaneous connections
 `--timeout` |10| timeout in seconds for all. Defaults to 10 seconds.
 `--retry` |3| retry connection. Defaults to 3 attempts
-`-l`,`--log` | None|
-`--debug` | False|
+`-l`,`--log` | None| locate log file. If none thet print to console
+`--debug` | False| Set level to default
 
 Requirements
 -----
