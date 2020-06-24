@@ -52,9 +52,7 @@ async def fetch(output_folder, session, url, semaphore):
         if not news_details:
             logging.error(f"News on site {news_details}, not download")
             return None
-        soup = BeautifulSoup(news_details, "html.parser")
-
-        news_name = slugify(soup.find("a", {"class": "storylink"}).text)
+        news_name, news_site, all_links = await parsed_details_page(news_details)
 
         await save_to_file(
             os.path.join(
@@ -64,29 +62,31 @@ async def fetch(output_folder, session, url, semaphore):
             ),
             news_details,
         )
-        if news_name:
-            await download_theme_news(output_folder, news_name, session, soup)
-        await download_link_from_comments(output_folder, news_name, session, soup)
+        if news_name and news_site:
+            await download_theme_news(output_folder, news_name, session, news_site)
+        await download_link_from_comments(output_folder, news_name, session, all_links)
         logging.info(f"news {news_name} was full download ")
 
 
-async def download_link_from_comments(output_folder, news_name, session, soup):
-    all_links = []
-    comment_tree = soup.find("table", {"class": "comment-tree"})
-    if soup.find("table", {"class": "comment-tree"}):
-        all_links = [
-            link["href"]
-            for link in comment_tree.find_all("a")
-            if link["href"].startswith("https://") or link["href"].startswith("http://")
-        ]
-    logging.info(f"Found {len(all_links)} comment for news {news_name}")
+async def parsed_details_page(news_details):
+    soup = BeautifulSoup(news_details, "html.parser")
+    news_name = slugify(soup.find("a", {"class": "storylink"}).text)
+    news_site = get_news_site(soup)
+    all_links = get_all_links_from_comment(soup)
+    logging.info(
+        f"For news {news_name} parsed links: {news_site if news_name else 'new on details page'} "
+        f"and found {len(all_links)} links in comment"
+    )
+    return news_name, news_site, all_links
 
+
+async def download_link_from_comments(output_folder, news_name, session, all_links):
     comments_news = [
         asyncio.create_task(download_one(session, url_from_comment))
         for url_from_comment in all_links
     ]
     comments_list_tuple = await asyncio.gather(*comments_news)
-    for num, comment_with_url in enumerate(comments_list_tuple):
+    for comment_with_url in comments_list_tuple:
         if comment_with_url:
             name_file = (
                 comment_with_url[1].name
@@ -98,12 +98,19 @@ async def download_link_from_comments(output_folder, news_name, session, soup):
             )
 
 
-async def download_theme_news(output_folder, news_name, session, soup):
-    news_site_block = soup.find("a", {"class": "storylink"})
-    news_site = news_site_block["href"]
-    if not news_site.startswith("https://") and not news_site.startswith("http://"):
-        logging.info("News text locate in details")
-        return None
+def get_all_links_from_comment(soup):
+    all_links = []
+    comment_tree = soup.find("table", {"class": "comment-tree"})
+    if soup.find("table", {"class": "comment-tree"}):
+        all_links = [
+            link["href"]
+            for link in comment_tree.find_all("a")
+            if link["href"].startswith("https://") or link["href"].startswith("http://")
+        ]
+    return all_links
+
+
+async def download_theme_news(output_folder, news_name, session, news_site):
     news_theme = await download_one(session, news_site)
     if not news_theme:
         logging.error(f"url {news_site} not avalible.")
@@ -111,14 +118,24 @@ async def download_theme_news(output_folder, news_name, session, soup):
     await save_to_file(os.path.join(output_folder, news_name, news_name), news_theme[0])
 
 
+def get_news_site(soup):
+    news_site_block = soup.find("a", {"class": "storylink"})
+    news_site = news_site_block["href"]
+    if not news_site.startswith("https://") and not news_site.startswith("http://"):
+        logging.info("News text locate in details")
+        return None
+    return news_site
+
+
 async def main(args, list_news):
     semaphore = asyncio.Semaphore(args.semaphore)
     timeout = aiohttp.ClientTimeout(total=args.timeout)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         res, _ = await download_one(session, SITE_NEWS)
-        soup = BeautifulSoup(res, "html.parser")
         list_tasks_fetch_news = []
-        for news in soup.find_all("tr", {"class": "athing"}):
+
+        all_news = await get_all_news(res)
+        for news in all_news:
             if news["id"] in list_news:
                 logging.debug(f"news '{news.text}' already download")
                 continue
@@ -136,6 +153,12 @@ async def main(args, list_news):
             )
         await asyncio.gather(*list_tasks_fetch_news)
     logging.info("Fetch all.")
+
+
+async def get_all_news(res):
+    soup = BeautifulSoup(res, "html.parser")
+    all_news = soup.find_all("tr", {"class": "athing"})
+    return all_news
 
 
 async def run_forever(args, list_news):
