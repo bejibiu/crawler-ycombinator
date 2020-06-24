@@ -107,7 +107,7 @@ async def download_theme_news(output_folder, news_name, session, soup):
     news_theme = await download_one(session, news_site)
     if not news_theme:
         logging.error(f"url {news_site} not avalible.")
-        news_theme[0] = f"Sorry =(. Url {news_site} not avalible.".encode()
+        news_theme = [f"Sorry =(. Url {news_site} not available.".encode()]
     await save_to_file(os.path.join(output_folder, news_name, news_name), news_theme[0])
 
 
@@ -139,9 +139,10 @@ async def main(args, list_news):
 
 
 async def run_forever(args, list_news):
+    loop = asyncio.get_running_loop()
     while True:
-        logging.info("Run chiclefetche news")
-        await main(args, list_news)
+        logging.info("Run cycle fetching news")
+        asyncio.run_coroutine_threadsafe(main(args, list_news), loop)
         await asyncio.sleep(args.period)
 
 
@@ -190,4 +191,5 @@ if __name__ == "__main__":
     if not os.path.exists(args.output):
         os.mkdir(args.output)
     list_news = []
+    logging.info(f"Run with period={args.period}, timeout={args.timeout}")
     asyncio.run(run_forever(args, list_news))
