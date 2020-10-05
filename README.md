@@ -1,6 +1,6 @@
 Ycrawler
 ========
-a training project for training asynchronous programming skills. The program downloads the news from news.ycombinator.com, 30 topics and links in comments.
+asynchronous programming. The program downloads the news from news.ycombinator.com, 30 topics and links in comments.
 
 Params
 --------
